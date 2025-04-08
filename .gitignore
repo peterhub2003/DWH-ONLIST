@@ -5,3 +5,7 @@
 .vscode/
 .windsurf-server/
 .codeium/
+
+
+notebooks/.ipynb_checkpoints/
+notebooks/tests/.ipynb_checkpoints/
