@@ -1,0 +1,127 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:13 
+    container_name: olist_postgres_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+
+      SUPERSET_DB_NAME: ${SUPERSET_DB_NAME}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432" 
+    networks:
+      - olist_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7 
+    container_name: olist_redis_cache
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - olist_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  superset:
+    image: thangdoc/superset-bigdata:latest 
+    container_name: olist_superset_bi
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy 
+    env_file:
+      - ./superset/.env
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY}
+      SQLALCHEMY_DATABASE_URI: postgresql://${SUPERSET_DB_USER}:${SUPERSET_DB_PASSWORD}@db:${SUPERSET_DB_PORT}/${SUPERSET_DB_NAME}
+
+      SUPERSET_CONFIG_PATH: /app/config/superset_config.py
+      SUPERSET_LOAD_EXAMPLES: "${SUPERSET_LOAD_EXAMPLES:-no}"
+      SUPERSET_LOG_LEVEL: "${SUPERSET_LOG_LEVEL:-info}"
+
+      ADMIN_USER: ${SUPERSET_ADMIN_USER}
+      ADMIN_PASSWORD: ${SUPERSET_ADMIN_PASSWORD}
+      ADMIN_EMAIL: ${SUPERSET_ADMIN_EMAIL}
+    volumes:
+      - ./superset/:/app/config/ 
+      - superset_home:/app/superset_home
+      - ./superset/entrypoint.sh:/app/docker/entrypoint.sh
+      # - ./superset/superset_config.py:/app/config/superset_config.py
+    ports:
+      - "8088:8088" # Cổng mặc định của Superset Web UI
+    networks:
+      - olist_network
+    entrypoint: ["/app/docker/entrypoint.sh"] 
+    command: ["/usr/bin/run-server.sh"]
+    # Lệnh entrypoint/command mặc định của image thường xử lý việc chạy webserver
+    # Có thể cần chạy lệnh init thủ công sau khi compose up lần đầu
+
+  adminer: # Công cụ quản lý DB (nhẹ hơn pgAdmin)
+    image: adminer:latest
+    container_name: olist_db_admin
+    restart: unless-stopped
+    ports:
+      - "8080:8080" # Cổng truy cập Adminer Web UI
+    networks:
+      - olist_network
+    depends_on:
+      - postgres
+
+
+  jupyterlab:
+    image: jupyter/scipy-notebook:latest
+    container_name: olist_jupyter_lab
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./data:/home/jovyan/data
+      - ./etl:/home/jovyan/etl
+    networks:
+      - olist_network
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+
+      JUPYTER_ENABLE_LAB: "yes"
+
+    user: "${UID}:${GID}"
+    depends_on:
+      - postgres
+    command: 
+      start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''
+
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  superset_home: # Bỏ comment nếu mount volume cho superset_home
+     driver: local
+
+networks:
+  olist_network:
+    driver: bridge

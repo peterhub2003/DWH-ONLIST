@@ -1,0 +1,7 @@
+*.txt
+
+.idea/
+.lightning_studio/
+.vscode/
+.windsurf-server/
+.codeium/
